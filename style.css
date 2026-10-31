@@ -148,11 +148,24 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .seg button { font: 500 13px/1 var(--body); padding: 10px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap; }
 .seg button:hover { color: var(--text); }
 .seg button[aria-pressed="true"] { background: rgba(111, 231, 255, 0.16); color: var(--holo); }
-.size { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding: 0 6px; flex: none; }
-.size input { width: 88px; accent-color: var(--holo); padding: 0; border: 0; background: none; }
+.seg button.icon { position: relative; padding: 8px 10px; display: grid; place-items: center; }
+.icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon .slash { display: none; }
+.icon[aria-pressed="false"] { color: var(--danger) !important; background: rgba(255, 107, 122, 0.14) !important; }
+.icon[aria-pressed="false"] .slash { display: inline; }
+.icon[aria-pressed="true"] { color: var(--text); background: transparent; }
+.icon .lvl { position: absolute; left: 7px; right: 7px; bottom: 3px; height: 3px; border-radius: 2px; background: var(--live); transform-origin: left; transform: scaleX(var(--lvl, 0)); transition: transform 60ms linear; }
+.icon:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.more { left: 50%; transform: translateX(-50%); bottom: var(--above); width: min(30rem, calc(100% - 24px)); padding: 12px; display: grid; gap: 10px; z-index: 3; }
+.morerow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.morelabel { font: 600 12px/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); width: 82px; flex: none; }
+.morerow input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--holo); padding: 0; border: 0; background: none; }
+.remotestate { position: absolute; left: 50%; top: calc(var(--top) + 46px); transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: rgba(255, 107, 122, 0.16); border: 1px solid rgba(255, 107, 122, 0.4); color: #ffd3d8; font-size: 13px; white-space: nowrap; }
 .toolbar .btn { padding: 10px 14px; flex: none; }
 
 .pip { position: absolute; right: var(--gutR); top: calc(var(--top) + 46px); width: min(24vw, 150px); aspect-ratio: 3 / 4; object-fit: cover; border-radius: 12px; border: 1px solid var(--line); transform: scaleX(-1); background: #000; }
+.pip.back { transform: none; }
 .sound { position: absolute; left: 50%; top: calc(var(--top) + 52px); transform: translateX(-50%); }
 .toast { position: absolute; left: 50%; bottom: var(--above); transform: translate(-50%, 8px); width: max-content; max-width: min(30rem, calc(100% - 32px)); padding: 10px 14px; border-radius: 10px; background: var(--panel-solid); border: 1px solid var(--line); font-size: 13.5px; opacity: 0; transition: opacity 0.2s, transform 0.2s; pointer-events: none !important; text-align: center; z-index: 5; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
@@ -161,6 +174,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 /* Glasses / Display / WebXR strip the HUD down. */
 body.glasses #hud > :not(#exitMode):not(#toast),
+body.in-xr .more,
 body.display #hud > :not(#exitMode):not(#castTitle):not(#reactions):not(#toast),
 body.in-xr .topbar, body.in-xr .pip, body.in-xr .side, body.in-xr .lobby, body.in-xr .toolbar, body.in-xr .board { display: none !important; }
 body.display .exitmode { opacity: 0.25; }
@@ -171,6 +185,8 @@ body.display .exitmode:hover, body.display .exitmode:focus-visible { opacity: 1;
   .tabbody { padding: 16px 16px 18px; }
   .side { left: 10px; right: 10px; width: auto; max-height: 52vh; }
   .toolbar { left: 10px; right: 10px; transform: none; max-width: none; flex-wrap: wrap; justify-content: center; }
+  .more { left: 10px; right: 10px; width: auto; transform: none; }
+  .morelabel { width: 100%; }
   .pip { top: auto; bottom: var(--above); width: 26vw; }
   .card, .board { right: 10px; }
   .card { bottom: var(--above); width: min(15rem, calc(100% - 40vw)); }

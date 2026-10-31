@@ -1,4 +1,5 @@
 import * as stage from './stage.js';
+import * as media from './media.js';
 import { loadPersonSegmenter, segmentVideo, resetVideo } from './segment.js';
 import { SAMPLES, loadPhoto, cutPhoto, wholePhoto } from './products.js';
 import * as net from './net.js';
@@ -9,7 +10,7 @@ const TABS = ['call', 'shop', 'live', 'class', 'stage', 'about'];
 const PRESETS = {
   live: {
     label: 'Live selling', mount: 'projector', size: 1, studio: 'studioLive', viewerBtns: ['heartBtn'],
-    inviteLabel: 'Your live code', note: 'Viewers open the link to watch. They don\'t need a camera.',
+    inviteLabel: 'Your live code', note: 'Viewers open the link to watch. They don\'t need a camera. Switch to the back camera to show a product up close.',
   },
   class: {
     label: 'Class', mount: 'projector', size: 1, studio: 'studioClass', viewerBtns: ['handBtn'],
@@ -25,7 +26,6 @@ const session = {
   kind: null,        // solo | call | shop | host | viewer
   preset: null,      // live | class | stage for host/viewer
   link: null,        // the active net connection
-  local: null,       // our camera stream
   code: null,
   cast: { card: null, board: '', title: null },
   hands: new Map(),
@@ -34,9 +34,11 @@ const session = {
   claps: 0,
 };
 
-// Live video subjects get a fresh AI mask every frame.
+// Live video subjects get a fresh AI mask every frame (unless showing the full frame).
 stage.onFrame(() => {
-  if (stage.subjectKind() === 'video') segmentVideo(stage.subjectVideo, (f, w, h) => stage.writeMask(f, w, h));
+  if (stage.subjectKind() === 'video' && stage.cutoutEnabled()) {
+    segmentVideo(stage.subjectVideo, (f, w, h) => stage.writeMask(f, w, h));
+  }
 });
 
 // ---------------------------------------------------------------- helpers
@@ -60,26 +62,15 @@ function setBusy(busy) {
 }
 
 const cleanCode = (v) => v.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-const stopStream = (s) => s?.getTracks().forEach((t) => t.stop());
 
-async function getLocalStream() {
-  if (session.local) return session.local;
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser cannot open the camera. Open the page over https in Chrome, Edge or Safari.');
-  const video = { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } };
-  try {
-    session.local = await navigator.mediaDevices.getUserMedia({ video, audio: { echoCancellation: true, noiseSuppression: true } });
-  } catch (e) {
-    if (e.name === 'NotAllowedError') throw new Error('Camera permission was blocked. Allow the camera in the address bar, then try again.');
-    if (e.name === 'NotFoundError') throw new Error('No camera found on this device.');
-    session.local = await navigator.mediaDevices.getUserMedia({ video, audio: false });
-  }
-  $('localVideo').srcObject = session.local;
-  return session.local;
-}
-
-function configureToolbar({ style = true, size = true, extras = [] } = {}) {
-  $('styleSeg').hidden = !style;
+// av: show mic/camera buttons; cutout: show the "cut out person / full video" choice.
+function configureToolbar({ style = true, size = true, cutout = true, av = false, extras = [] } = {}) {
+  $('styleRow').hidden = !style;
   $('sizeWrap').hidden = !size;
+  $('cutoutRow').hidden = !cutout;
+  $('avBtns').hidden = !av;
+  $('flipBtn').hidden = !av || media.local.cameras < 2;
+  $('productBtns').hidden = $('productBtns').childElementCount === 0;
   for (const b of $('extraBtns').children) b.hidden = !extras.includes(b.id);
   $('extraBtns').hidden = extras.length === 0;
 }
@@ -99,11 +90,18 @@ async function begin({ camera = false, segmenter = false } = {}) {
   setBusy(true);
   try {
     const seg = segmenter ? loadPersonSegmenter() : null;
-    if (camera) { setStatus('Opening camera…', 'busy'); await getLocalStream(); }
+    if (camera) {
+      setStatus('Opening camera and microphone…', 'busy');
+      await media.openCamera();
+      $('localVideo').srcObject = media.local.stream;
+      setAvButtons();
+      media.startMeter((lvl) => $('micBtn').style.setProperty('--lvl', lvl.toFixed(2)));
+      if (!media.local.hasAudio) toast('No microphone available, so the other side won\'t hear you. Check the microphone permission.', 7000);
+    }
     if (seg) { setStatus('Loading the AI cutout…', 'busy'); await seg; }
   } catch (e) {
     console.error(e);
-    stopStream(session.local); session.local = null;
+    media.stopCamera();
     setStatus('Could not start', 'bad');
     toast(e.message || 'Could not start the camera or the AI model. Check your connection and try again.', 7000);
     return false;
@@ -120,6 +118,89 @@ async function showRemote(stream) {
   resetVideo();
   const soundOk = await stage.showVideo(stream, { mirror: false, muted: false });
   $('soundBtn').hidden = soundOk;
+  if (!stream.getAudioTracks().length) toast('No sound is coming from their side. Their microphone may be blocked.', 6000);
+}
+
+// ---------------------------------------------------------------- your mic & camera
+
+function setAvButtons() {
+  const { mic, cam, hasAudio, facing } = media.local;
+  const micBtn = $('micBtn'), camBtn = $('camBtn'), flipBtn = $('flipBtn');
+  micBtn.disabled = !hasAudio;
+  micBtn.setAttribute('aria-pressed', String(mic && hasAudio));
+  micBtn.setAttribute('aria-label', !hasAudio ? 'No microphone' : mic ? 'Microphone on' : 'Microphone muted');
+  micBtn.title = mic ? 'Mute microphone' : 'Unmute microphone';
+  camBtn.setAttribute('aria-pressed', String(cam));
+  camBtn.setAttribute('aria-label', cam ? 'Camera on' : 'Camera off');
+  camBtn.title = cam ? 'Turn camera off' : 'Turn camera on';
+  flipBtn.setAttribute('aria-label', facing === 'user' ? 'Switch to back camera' : 'Switch to front camera');
+  $('localVideo').classList.toggle('back', facing !== 'user');
+}
+
+function sendAv() {
+  session.link?.send({ t: 'av', mic: media.local.mic && media.local.hasAudio, cam: media.local.cam });
+}
+
+$('micBtn').addEventListener('click', () => {
+  media.setMic(!media.local.mic);
+  setAvButtons();
+  sendAv();
+  toast(media.local.mic ? 'Microphone on.' : 'Microphone muted. They can\'t hear you.', 2200);
+});
+
+$('camBtn').addEventListener('click', () => {
+  media.setCam(!media.local.cam);
+  setAvButtons();
+  sendAv();
+});
+
+$('flipBtn').addEventListener('click', async () => {
+  $('flipBtn').disabled = true;
+  try {
+    const facing = await media.flipCamera((track) => session.link?.replaceVideoTrack?.(track) ?? Promise.resolve());
+    const front = facing === 'user';
+    $('localVideo').srcObject = media.local.stream;
+    // Our own preview (solo, presenters) follows the camera; the person model can't cut out products.
+    if (session.kind === 'solo' || session.kind === 'host') {
+      resetVideo();
+      stage.showVideo(media.local.stream, { mirror: front, muted: true });
+      setCutout(front);
+    }
+    session.link?.send({ t: 'cutout', on: front });
+    toast(front ? 'Front camera.' : 'Back camera. They now see your full video, so products show up too.', 4000);
+  } catch (e) {
+    toast(e.message, 4000);
+  } finally {
+    setAvButtons();
+    $('flipBtn').disabled = false;
+  }
+});
+
+function setCutout(on) {
+  stage.setCutout(on);
+  $('cutOn').setAttribute('aria-pressed', String(on));
+  $('cutOff').setAttribute('aria-pressed', String(!on));
+}
+$('cutOn').addEventListener('click', () => setCutout(true));
+$('cutOff').addEventListener('click', () => setCutout(false));
+
+// What the other side tells us about their mic, camera and framing.
+function handleRemoteAv(msg) {
+  if (msg.t === 'av') {
+    const notes = [];
+    if (msg.mic === false) notes.push('mic muted');
+    if (msg.cam === false) notes.push('camera off');
+    const who = session.kind === 'viewer' ? 'Presenter' : 'They';
+    $('remoteState').textContent = notes.length ? `${who}: ${notes.join(' · ')}` : '';
+    $('remoteState').hidden = !notes.length;
+    return true;
+  }
+  if (msg.t === 'cutout') {
+    setCutout(msg.on !== false);
+    if (msg.on === false) toast('They switched to their back camera. Showing their full video.', 4000);
+    return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------- tabs
@@ -178,19 +259,28 @@ $('btnSolo').addEventListener('click', async () => {
   session.kind = 'solo';
   stage.setMount('projector');
   resetVideo();
-  stage.showVideo(session.local, { mirror: true, muted: true });
-  configureToolbar();
+  stage.showVideo(media.local.stream, { mirror: true, muted: true });
+  configureToolbar({ av: true });
   setStatus('Solo preview · this is how you would appear', 'live');
 });
+
+function callHandlers(extra) {
+  return {
+    onMessage: handleRemoteAv,
+    onDataOpen() { sendAv(); session.link?.send({ t: 'cutout', on: media.local.facing === 'user' }); },
+    onError(err) { setStatus('Connection problem', 'bad'); toast(net.friendlyError(err), 6000); },
+    ...extra,
+  };
+}
 
 $('btnCall').addEventListener('click', async () => {
   if (!await begin({ camera: true, segmenter: true })) return;
   session.kind = 'call';
   stage.setMount('projector');
-  configureToolbar({ extras: ['panelBtn'] });
+  configureToolbar({ av: true, extras: ['panelBtn'] });
   $('localVideo').hidden = false;
   setStatus('Opening a call line…', 'busy');
-  session.link = net.callHost(session.local, {
+  session.link = net.callHost(media.local.stream, callHandlers({
     onCode(code) {
       showInvite(code, 'call', { label: 'Your call code', note: 'Open the link on another phone or laptop. When they join, they appear on the projector.' });
       setStatus(`Waiting for someone to join · ${code}`, 'busy');
@@ -198,11 +288,11 @@ $('btnCall').addEventListener('click', async () => {
     onRemote(s) { showRemote(s); $('invite').hidden = true; setStatus('Live · drag to look around', 'live'); },
     onRemoteGone() {
       stage.clearSubject();
+      $('remoteState').hidden = true;
       setStatus(`They left · code ${session.code} is still open`, 'idle');
       toast('The other person left the call.');
     },
-    onError(err) { setStatus('Connection problem', 'bad'); toast(net.friendlyError(err), 6000); },
-  });
+  }));
 });
 
 $('callJoin').addEventListener('submit', async (e) => {
@@ -212,16 +302,15 @@ $('callJoin').addEventListener('submit', async (e) => {
   if (!await begin({ camera: true, segmenter: true })) return;
   session.kind = 'call';
   stage.setMount('projector');
-  configureToolbar();
+  configureToolbar({ av: true });
   $('localVideo').hidden = false;
   setStatus(`Calling ${code}…`, 'busy');
-  session.link = net.callJoin(code, session.local, {
+  session.link = net.callJoin(code, media.local.stream, callHandlers({
     onRemote(s) { showRemote(s); setStatus('Live · drag to look around', 'live'); },
-    onRemoteGone() { stage.clearSubject(); setStatus('Call ended', 'idle'); toast('The other person left the call.'); },
+    onRemoteGone() { stage.clearSubject(); $('remoteState').hidden = true; setStatus('Call ended', 'idle'); toast('The other person left the call.'); },
     onNotFound() { setStatus('No call with that code', 'bad'); toast(`No call is waiting on code ${code}. Check the code, or ask them to start the call again.`, 6500); },
     onNoAnswer() { setStatus('No answer', 'bad'); toast('They didn\'t pick up. They may already be in a call.', 6000); },
-    onError(err) { setStatus('Connection problem', 'bad'); toast(net.friendlyError(err), 6000); },
-  });
+  }));
 });
 
 // ---------------------------------------------------------------- Shop tab
@@ -233,7 +322,7 @@ async function viewSample(id) {
   const m = sample.make($('tvSize').value);
   stage.setMount('floor');
   stage.showModel(m.object, m.dims);
-  configureToolbar({ style: false, size: false });
+  configureToolbar({ style: false, size: false, cutout: false });
   $('productTag').textContent = m.label;
   $('productTag').hidden = false;
   setStatus('Real size · drag to look around', 'live');
@@ -342,7 +431,7 @@ $('viewOwn').addEventListener('click', async () => {
   stage.setMount('floor');
   stage.showImage(cut.canvas, cut.alpha, cut.w, cut.h, { w: w / 100, h: h / 100, d: Math.min(w, h) / 200 });
   setStyle(false);
-  configureToolbar({ style: true, size: false });
+  configureToolbar({ style: true, size: false, cutout: false });
   const name = $('prodName').value.trim() || 'Your product';
   $('productTag').textContent = `${name} · ${w} × ${h} cm`;
   $('productTag').hidden = false;
@@ -356,7 +445,7 @@ function applyPreset(preset, role) {
   session.preset = preset;
   stage.setMount(p.mount);
   setSize(p.size);
-  configureToolbar({ extras: role === 'host' ? ['panelBtn'] : p.viewerBtns });
+  configureToolbar({ av: role === 'host', extras: role === 'host' ? ['panelBtn'] : p.viewerBtns });
 }
 
 function renderCast() {
@@ -433,13 +522,18 @@ async function startHost(preset) {
   $('clapCount').textContent = '0';
   applyPreset(preset, 'host');
   resetVideo();
-  stage.showVideo(session.local, { mirror: true, muted: true });  // presenters preview themselves
+  stage.showVideo(media.local.stream, { mirror: true, muted: true });  // presenters preview themselves
   for (const id of ['studioLive', 'studioClass', 'studioStage']) $(id).hidden = id !== p.studio;
   $('studio').hidden = false;
   renderHands();
   renderCast();
   setStatus('Opening…', 'busy');
-  session.link = net.castHost(session.local, () => ({ preset, ...session.cast }), {
+  const snapshot = () => ({
+    preset, ...session.cast,
+    av: { mic: media.local.mic && media.local.hasAudio, cam: media.local.cam },
+    cutout: media.local.facing === 'user',
+  });
+  session.link = net.castHost(media.local.stream, snapshot, {
     onCode(code) {
       showInvite(code, preset, { label: p.inviteLabel, note: p.note });
       setStatus(`${p.label} · on air · 0 watching`, 'live');
@@ -507,8 +601,13 @@ async function startViewer(preset, code, name) {
   session.link = net.castJoin(code, name, {
     onStream(s) { showRemote(s); setStatus(label(), 'live'); },
     onMessage(msg) {
+      if (handleRemoteAv(msg)) return;
       if (msg.t === 'state' || msg.t === 'cast') {
-        if (msg.t === 'state' && PRESETS[msg.preset] && msg.preset !== session.preset) applyPreset(msg.preset, 'viewer');
+        if (msg.t === 'state') {
+          if (PRESETS[msg.preset] && msg.preset !== session.preset) applyPreset(msg.preset, 'viewer');
+          if (msg.av) handleRemoteAv({ t: 'av', ...msg.av });
+          if (msg.cutout === false) setCutout(false);
+        }
         session.cast = {
           card: msg.card && typeof msg.card === 'object' ? msg.card : null,
           board: typeof msg.board === 'string' ? msg.board.slice(0, 400) : '',
@@ -524,6 +623,7 @@ async function startViewer(preset, code, name) {
     },
     onEnded(reason) {
       stage.clearSubject();
+      $('remoteState').hidden = true;
       if (reason === 'full') { setStatus('This broadcast is full', 'bad'); toast(`This prototype allows ${net.MAX_VIEWERS} viewers per broadcast, and it's full.`, 6000); }
       else { setStatus('The broadcast has ended', 'idle'); toast('The presenter ended the broadcast.'); }
     },
@@ -558,10 +658,19 @@ $('handBtn').addEventListener('click', () => {
 
 let glasses = false, display = false;
 
+function setMorePanel(open) {
+  $('morePanel').hidden = !open;
+  $('moreBtn').setAttribute('aria-expanded', String(open));
+  $('moreBtn').textContent = open ? 'View ▾' : 'View ▴';
+}
+$('moreBtn').addEventListener('click', () => setMorePanel($('morePanel').hidden));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('morePanel').hidden) setMorePanel(false); });
+$('stage').addEventListener('pointerdown', () => setMorePanel(false));
+
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', async () => {
   try {
     await stage.setView(b.dataset.view);
-    const camEnded = session.local?.getVideoTracks().some((t) => t.readyState === 'ended');
+    const camEnded = media.local.stream?.getVideoTracks().some((t) => t.readyState === 'ended');
     if (b.dataset.view === 'camera' && camEnded) {
       toast('This phone can\'t run both cameras at once, so the other side may not see you in Camera AR.', 6000);
     }
@@ -573,6 +682,7 @@ stage.onViewChange((view) => {
 
 stage.onXR({
   start() {
+    setMorePanel(false);
     document.body.classList.add('in-xr');
     $('xrHint').textContent = session.kind === 'shop'
       ? 'Point at the floor or a table, then tap to place it at real size.'
@@ -601,6 +711,7 @@ async function setGlasses(on) {
   $('exitMode').hidden = !(on || display);
   stage.setGlasses(on);
   if (on) {
+    setMorePanel(false);
     await enterFullscreen();
     try { await screen.orientation?.lock?.('landscape'); } catch { /* optional */ }
     toast('Side-by-side 3D. Put the phone in a Cardboard viewer, or set your display glasses to 3D (SBS) mode.', 6000);
@@ -614,6 +725,7 @@ async function setDisplay(on) {
   document.body.classList.toggle('display', on);
   $('exitMode').hidden = !(on || glasses);
   if (on) {
+    setMorePanel(false);
     await enterFullscreen();
     toast('Display mode. Controls are hidden; the Exit button stays faint at the top.', 4000);
   } else if (document.fullscreenElement && !glasses) {
@@ -656,15 +768,17 @@ function endSession() {
   if (display) setDisplay(false);
   stage.setTilt(false);
   $('tiltBtn').setAttribute('aria-pressed', 'false');
-  stopStream(session.local);
-  session.local = null;
+  media.stopCamera();
   $('localVideo').srcObject = null;
   $('localVideo').hidden = true;
-  for (const id of ['invite', 'studio', 'castCard', 'castBoard', 'castTitle', 'productTag', 'soundBtn', 'toolbar']) $(id).hidden = true;
+  for (const id of ['invite', 'studio', 'castCard', 'castBoard', 'castTitle', 'productTag', 'soundBtn', 'toolbar', 'remoteState']) $(id).hidden = true;
+  setMorePanel(false);
   $('reactions').textContent = '';
   $('handBtn').setAttribute('aria-pressed', 'false');
   $('handBtn').textContent = '✋ Raise hand';
+  $('productBtns').textContent = '';
   setStyle(true);
+  setCutout(true);
   setSize(1);
   stage.setLobby(true);
   session.kind = session.preset = session.code = null;

@@ -45,8 +45,20 @@ function keepAlive(peer) {
 
 // ---------------------------------------------------------------- one-to-one
 
+// Swaps the outgoing camera track on a live connection (front/back camera switch).
+function swapVideo(mc, track) {
+  const sender = mc?.peerConnection?.getSenders().find((x) => x.track?.kind === 'video');
+  return sender ? sender.replaceTrack(track) : Promise.resolve();
+}
+
+// A small message channel next to the video, for mic/camera/cutout state.
+function wireData(conn, h, onOpen) {
+  conn.on('open', () => onOpen(conn));
+  conn.on('data', (msg) => { if (msg && typeof msg === 'object') h.onMessage?.(msg); });
+}
+
 export function callHost(stream, h) {
-  let peer, current = null;
+  let peer, current = null, data = null;
   const open = () => {
     const code = makeCode();
     peer = new Peer(CALL_PREFIX + code, { debug: 1 });
@@ -59,29 +71,39 @@ export function callHost(stream, h) {
       mc.on('stream', (remote) => h.onRemote(remote));
       watchMedia(mc, () => { if (current === mc) { current = null; h.onRemoteGone(); } });
     });
+    peer.on('connection', (conn) => wireData(conn, h, (c) => { data?.close(); data = c; h.onDataOpen?.(); }));
     peer.on('error', (err) => {
       if (err.type === 'unavailable-id') { peer.destroy(); open(); return; }
       h.onError(err);
     });
   };
   open();
-  return { close() { current?.close(); peer?.destroy(); } };
+  return {
+    send(msg) { if (data?.open) data.send(msg); },
+    replaceVideoTrack: (track) => swapVideo(current, track),
+    close() { current?.close(); peer?.destroy(); },
+  };
 }
 
 export function callJoin(code, stream, h) {
   const peer = new Peer({ debug: 1 });
-  let mc = null, gotStream = false;
+  let mc = null, data = null, gotStream = false;
   const timer = setTimeout(() => { if (!gotStream) h.onNoAnswer(); }, NO_ANSWER_MS);
   peer.on('open', () => {
     mc = peer.call(CALL_PREFIX + code, stream);
     mc.on('stream', (remote) => { gotStream = true; clearTimeout(timer); h.onRemote(remote); });
     watchMedia(mc, () => { if (gotStream) h.onRemoteGone(); });
+    wireData(peer.connect(CALL_PREFIX + code, { reliable: true }), h, (c) => { data = c; h.onDataOpen?.(); });
   });
   peer.on('error', (err) => {
     clearTimeout(timer);
     if (err.type === 'peer-unavailable') h.onNotFound(); else h.onError(err);
   });
-  return { close() { clearTimeout(timer); mc?.close(); peer.destroy(); } };
+  return {
+    send(msg) { if (data?.open) data.send(msg); },
+    replaceVideoTrack: (track) => swapVideo(mc, track),
+    close() { clearTimeout(timer); mc?.close(); peer.destroy(); },
+  };
 }
 
 // ---------------------------------------------------------------- one-to-many
@@ -139,6 +161,7 @@ export function castHost(stream, getState, h) {
   open();
   return {
     send: broadcast,
+    replaceVideoTrack: (track) => Promise.all([...viewers.values()].map((v) => swapVideo(v.media, track))),
     close() {
       broadcast({ t: 'end' });
       setTimeout(() => peer?.destroy(), 300);

@@ -247,22 +247,56 @@
   <div id="productTag" class="tag" hidden></div>
   <div id="reactions" class="reactions" aria-hidden="true"></div>
 
+  <div id="remoteState" class="remotestate" hidden></div>
+
   <!-- ============================================================ toolbar -->
+  <div id="morePanel" class="panel more" hidden>
+    <div class="morerow">
+      <span class="morelabel">View</span>
+      <div class="seg" role="group" aria-label="View">
+        <button data-view="room" aria-pressed="true">Room</button>
+        <button data-view="camera" aria-pressed="false">Camera AR</button>
+        <button data-view="xr" aria-pressed="false" hidden>Place in room</button>
+      </div>
+    </div>
+    <div class="morerow" id="styleRow">
+      <span class="morelabel">Style</span>
+      <div class="seg" role="group" aria-label="Style">
+        <button data-style="holo" aria-pressed="true">Hologram</button>
+        <button data-style="real" aria-pressed="false">Real</button>
+      </div>
+    </div>
+    <div class="morerow" id="cutoutRow">
+      <span class="morelabel">Background</span>
+      <div class="seg" role="group" aria-label="Background">
+        <button id="cutOn" aria-pressed="true">Cut out person</button>
+        <button id="cutOff" aria-pressed="false">Show full video</button>
+      </div>
+    </div>
+    <div class="morerow">
+      <span class="morelabel">Look</span>
+      <div class="seg" role="group" aria-label="Options">
+        <button id="tiltBtn" aria-pressed="false">Tilt to look</button>
+        <button id="glassesBtn" aria-pressed="false">Glasses 3D</button>
+      </div>
+    </div>
+    <label class="morerow" id="sizeWrap" for="sizeRange"><span class="morelabel">Size</span><input id="sizeRange" type="range" min="0.6" max="2.2" step="0.05" value="1"></label>
+  </div>
+
   <nav id="toolbar" class="toolbar" hidden aria-label="Controls">
-    <div class="seg" role="group" aria-label="View">
-      <button data-view="room" aria-pressed="true">Room</button>
-      <button data-view="camera" aria-pressed="false">Camera AR</button>
-      <button data-view="xr" aria-pressed="false" hidden>Place in room</button>
+    <div class="seg" id="avBtns" role="group" aria-label="Your camera and microphone">
+      <button id="micBtn" class="icon" aria-pressed="true" aria-label="Microphone on" title="Mute microphone">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/><path class="slash" d="M4 4l16 16"/></svg>
+        <i class="lvl"></i>
+      </button>
+      <button id="camBtn" class="icon" aria-pressed="true" aria-label="Camera on" title="Turn camera off">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/><path class="slash" d="M3 3l18 18"/></svg>
+      </button>
+      <button id="flipBtn" class="icon" aria-label="Switch to back camera" title="Switch camera" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><path d="M9 13a3 3 0 0 1 5.2-2M15 13a3 3 0 0 1-5.2 2"/><path d="M14.5 9.5v1.7h-1.7M9.5 16.5v-1.7h1.7"/></svg>
+      </button>
     </div>
-    <div class="seg" id="styleSeg" role="group" aria-label="Style">
-      <button data-style="holo" aria-pressed="true">Hologram</button>
-      <button data-style="real" aria-pressed="false">Real</button>
-    </div>
-    <div class="seg" role="group" aria-label="Options">
-      <button id="tiltBtn" aria-pressed="false">Tilt to look</button>
-      <button id="glassesBtn" aria-pressed="false">Glasses 3D</button>
-    </div>
-    <label class="size" id="sizeWrap" for="sizeRange">Size <input id="sizeRange" type="range" min="0.6" max="2.2" step="0.05" value="1"></label>
+    <div class="seg" id="productBtns" role="group" aria-label="Product controls"></div>
     <div class="seg" id="extraBtns" role="group" aria-label="Actions">
       <button id="heartBtn" hidden>❤ Heart</button>
       <button id="handBtn" aria-pressed="false" hidden>✋ Raise hand</button>
@@ -270,6 +304,7 @@
       <button id="displayBtn" hidden>Display mode</button>
       <button id="panelBtn" hidden>Code &amp; tools</button>
     </div>
+    <button id="moreBtn" class="btn" aria-expanded="false" aria-controls="morePanel">View ▴</button>
     <button id="hangup" class="btn danger">End</button>
   </nav>
 

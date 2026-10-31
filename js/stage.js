@@ -332,7 +332,9 @@ function clearModel() {
 
 export function showVideo(stream, { mirror = false, muted = true } = {}) {
   clearModel();
-  subjectVideo.srcObject = stream;
+  // WebRTC can deliver the same stream twice (audio, then video); re-assigning it would
+  // interrupt play() mid-way.
+  if (subjectVideo.srcObject !== stream) subjectVideo.srcObject = stream;
   subjectVideo.muted = muted;
   cutMat.uniforms.uVideo.value = videoTex;
   cutMat.uniforms.uMirror.value = mirror ? 1 : 0;
@@ -342,7 +344,9 @@ export function showVideo(stream, { mirror = false, muted = true } = {}) {
   cutout.visible = !!stream;
   layout();
   if (!stream) return Promise.resolve(true);
-  return subjectVideo.play().then(() => true, () => {
+  return subjectVideo.play().then(() => true, (e) => {
+    // Only an autoplay block should silence the call; an interrupted play() is harmless.
+    if (e?.name !== 'NotAllowedError') return true;
     subjectVideo.muted = true;
     subjectVideo.play().catch(() => {});
     return muted;  // false: autoplay blocked the sound, the page should offer a button
@@ -384,6 +388,17 @@ export function clearSubject() {
   st.kind = null;
   layout();
 }
+
+// Cutout off shows the whole video frame, e.g. when the back camera points at a product
+// (the person model would erase anything that isn't a person).
+let cutoutOn = true;
+export function setCutout(on) {
+  cutoutOn = on;
+  if (!on) writeMask(new Float32Array(64 * 64).fill(1), 64, 64, { blend: 1, invertAuto: false });
+  else if (smooth) smooth.fill(0);
+}
+export function cutoutEnabled() { return cutoutOn; }
+export function setMirror(on) { cutMat.uniforms.uMirror.value = on ? 1 : 0; }
 
 export function subjectKind() { return st.kind; }
 export function unmuteSubject() { subjectVideo.muted = false; return subjectVideo.play(); }
