@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>HoloCall</title>
+<meta name="description" content="See people and products in your own space: hologram video calls, real-size product viewing, live selling, classes and events, from any phone.">
+<meta name="theme-color" content="#070b14">
+<meta property="og:title" content="HoloCall">
+<meta property="og:description" content="Hologram video calls and real-size product viewing, from any phone. No headset needed.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070b14'/%3E%3Cpath d='M11 25h10l3-14H8z' fill='%236fe7ff' opacity='.35'/%3E%3Ccircle cx='16' cy='9' r='4' fill='%236fe7ff'/%3E%3Cellipse cx='16' cy='26' rx='7' ry='2' fill='%236fe7ff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Saira+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three-0.160.0/three.module.js", "three/addons/": "./vendor/three-0.160.0/addons/" } }
+</script>
+<script src="vendor/peerjs-1.5.4.min.js" defer></script>
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<!-- Videos sit behind the canvas so the browser keeps decoding frames for the 3D textures. -->
+<video id="subjectVideo" class="backdrop" playsinline></video>
+<video id="arVideo" class="backdrop" playsinline muted hidden></video>
+<canvas id="stage" aria-label="3D view"></canvas>
+
+<div id="hud">
+  <header class="topbar">
+    <div class="brand">HOLO<span>·</span>CALL</div>
+    <div id="status" class="status" data-tone="idle"><i></i><span id="statusText">Ready</span></div>
+  </header>
+
+  <video id="localVideo" class="pip" playsinline muted autoplay hidden></video>
+  <button id="soundBtn" class="btn sound" hidden>Tap to turn on sound</button>
+
+  <!-- ============================================================ lobby -->
+  <section id="lobby" class="panel lobby">
+    <nav class="tabs" role="tablist" aria-label="Use cases">
+      <button role="tab" id="tab-call" data-tab="call" aria-controls="p-call">Call</button>
+      <button role="tab" id="tab-shop" data-tab="shop" aria-controls="p-shop">Shop</button>
+      <button role="tab" id="tab-live" data-tab="live" aria-controls="p-live">Live</button>
+      <button role="tab" id="tab-class" data-tab="class" aria-controls="p-class">Class</button>
+      <button role="tab" id="tab-stage" data-tab="stage" aria-controls="p-stage">Stage</button>
+      <button role="tab" id="tab-about" data-tab="about" aria-controls="p-about">About</button>
+    </nav>
+
+    <div class="tabbody">
+      <!-- Call -->
+      <div role="tabpanel" id="p-call" aria-labelledby="tab-call" class="tp">
+        <p class="eyebrow">Video call · one to one</p>
+        <h1>Call someone into your room.</h1>
+        <p class="lede">Family abroad, a friend, a client. On-device AI cuts them out of their video and stands them on a holo projector you can walk around. Works between any two phones or laptops.</p>
+        <div class="actions">
+          <button id="btnSolo" class="btn primary" data-start>Try it on yourself</button>
+          <button id="btnCall" class="btn" data-start>Start a call</button>
+        </div>
+        <form id="callJoin" class="join" autocomplete="off">
+          <label for="callCode">Got a call code?</label>
+          <div class="joinrow">
+            <input id="callCode" class="codein" maxlength="6" placeholder="K7Q2MX" spellcheck="false" autocapitalize="characters">
+            <button class="btn" type="submit" data-start>Join call</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Shop -->
+      <div role="tabpanel" id="p-shop" aria-labelledby="tab-shop" class="tp" hidden>
+        <p class="eyebrow">Product viewer · real size</p>
+        <h1>Will it fit? See it at real size.</h1>
+        <p class="lede">Pick a sample, or use a photo of any product you sell. Then place it on your floor or table at true size with your phone camera.</p>
+        <div class="samples" id="samples">
+          <div class="sample">
+            <button class="sbtn" data-sample="tv"><b>Television</b><span>Pick a screen size</span></button>
+            <select id="tvSize" aria-label="TV screen size">
+              <option value="32">32"</option><option value="43" selected>43"</option><option value="55">55"</option><option value="65">65"</option>
+            </select>
+          </div>
+          <button class="sbtn" data-sample="sofa"><b>Sofa</b><span>200 × 85 cm</span></button>
+          <button class="sbtn" data-sample="fridge"><b>Fridge</b><span>60 × 175 cm</span></button>
+          <button class="sbtn" data-sample="lamp"><b>Floor lamp</b><span>48 × 165 cm</span></button>
+          <button class="sbtn" data-sample="plant"><b>Plant</b><span>70 × 110 cm</span></button>
+        </div>
+
+        <div class="own">
+          <div class="ownhead">
+            <div>
+              <h2>Your own product</h2>
+              <p class="fine">Bag, shoe, chair, bike, anything. The photo stays on your device.</p>
+            </div>
+            <button id="photoBtn" class="btn" type="button">Choose photo</button>
+            <input id="photoInput" type="file" accept="image/*" hidden>
+          </div>
+          <div id="cutEditor" class="cuteditor" hidden>
+            <p id="cutHint" class="fine">Tap the product in the photo to cut it out.</p>
+            <div class="cutviews">
+              <canvas id="photoCanvas" class="photo" aria-label="Your photo. Tap the product."></canvas>
+              <div class="checker"><canvas id="cutPreview" aria-label="Cut-out preview"></canvas></div>
+            </div>
+            <button id="wholePhoto" class="linkbtn" type="button">Use the whole photo instead</button>
+            <div class="sizes">
+              <label>Name <input id="prodName" maxlength="40" placeholder="Leather bag"></label>
+              <label>Width <span class="unit"><input id="prodW" type="number" min="1" max="2000" step="0.5" inputmode="decimal"> cm</span></label>
+              <label>Height <span class="unit"><input id="prodH" type="number" min="1" max="2000" step="0.5" inputmode="decimal"> cm</span></label>
+            </div>
+            <button id="viewOwn" class="btn primary" disabled>View at real size</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live -->
+      <div role="tabpanel" id="p-live" aria-labelledby="tab-live" class="tp" hidden>
+        <p class="eyebrow">Live selling · one to many</p>
+        <h1>Sell live, standing in the buyer's room.</h1>
+        <p class="lede">Go live and share the code. Viewers see you as a hologram, plus the product you're showing with its price and a button to order. Viewers don't need a camera.</p>
+        <div class="actions"><button id="btnLive" class="btn primary" data-start>Go live</button></div>
+        <form class="join castjoin" data-preset="live" autocomplete="off">
+          <label for="liveCode">Watching someone's live?</label>
+          <div class="joinrow">
+            <input id="liveCode" class="codein" maxlength="6" placeholder="Code" spellcheck="false" autocapitalize="characters">
+            <button class="btn" type="submit" data-start>Watch</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Class -->
+      <div role="tabpanel" id="p-class" aria-labelledby="tab-class" class="tp" hidden>
+        <p class="eyebrow">Teaching · tutoring</p>
+        <h1>Teach as if you're at their desk.</h1>
+        <p class="lede">Students join with a code and see you on their table. Pin notes to the board beside you, and see who raises a hand.</p>
+        <div class="actions"><button id="btnClass" class="btn primary" data-start>Start a class</button></div>
+        <form class="join castjoin" data-preset="class" autocomplete="off">
+          <label for="classCode">Joining a class?</label>
+          <div class="joinrow">
+            <input id="className" maxlength="30" placeholder="Your name" class="namein">
+          </div>
+          <div class="joinrow">
+            <input id="classCode" class="codein" maxlength="6" placeholder="Code" spellcheck="false" autocapitalize="characters">
+            <button class="btn" type="submit" data-start>Join class</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Stage -->
+      <div role="tabpanel" id="p-stage" aria-labelledby="tab-stage" class="tp" hidden>
+        <p class="eyebrow">Events · shop displays</p>
+        <h1>Put a speaker on any stage.</h1>
+        <p class="lede">A speaker anywhere appears life-size under a spotlight. Open the viewer on the venue's big screen or projector and switch on Display mode. The audience can send applause.</p>
+        <div class="actions"><button id="btnStage" class="btn primary" data-start>Go on stage</button></div>
+        <form class="join castjoin" data-preset="stage" autocomplete="off">
+          <label for="stageCode">Opening the venue screen?</label>
+          <div class="joinrow">
+            <input id="stageCode" class="codein" maxlength="6" placeholder="Code" spellcheck="false" autocapitalize="characters">
+            <button class="btn" type="submit" data-start>Open viewer</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- About -->
+      <div role="tabpanel" id="p-about" aria-labelledby="tab-about" class="tp about" hidden>
+        <p class="eyebrow">About this prototype</p>
+        <h1>See the person, not the screen.</h1>
+        <p class="lede">HoloCall turns an ordinary phone camera into an augmented view. No headset, no app install, no special camera.</p>
+        <h2>How it works</h2>
+        <ol class="steps">
+          <li><b>Cut out.</b> An AI model on the viewer's device separates the person (or the product you tap) from the background, 30 times a second.</li>
+          <li><b>Add depth.</b> The cut-out is bent forward using its own shape, so it has volume when you look around it.</li>
+          <li><b>Place it.</b> Show it in a virtual room, over your camera, life-size on your real floor (WebXR), or in side-by-side 3D for glasses.</li>
+          <li><b>Send it.</b> Video goes straight between devices (WebRTC). The server only introduces them.</li>
+        </ol>
+        <h2>Works today</h2>
+        <ul class="plain">
+          <li>Any modern phone or laptop browser. "Place in room" needs Chrome on an ARCore Android phone.</li>
+          <li>Cardboard viewers and display glasses (Xreal, Rokid) through Glasses 3D.</li>
+          <li>Calls between two people; Live, Class and Stage up to 12 viewers each.</li>
+        </ul>
+        <h2>Limits</h2>
+        <ul class="plain">
+          <li>2.5D, not full 3D: one camera can't see someone's back, so turning is limited to about 60°.</li>
+          <li>Cut-outs work best with one person, upper body in frame, and good light.</li>
+        </ul>
+        <h2>Going big</h2>
+        <ul class="plain">
+          <li><b>Thousands of viewers:</b> swap direct connections for a media server (LiveKit or Cloudflare Calls), so the presenter uploads once.</li>
+          <li><b>Reliable connections:</b> run our own signalling and TURN relay instead of the free public ones.</li>
+          <li><b>True 3D:</b> two or more phones around the presenter, or a depth camera, fused into a volumetric model.</li>
+        </ul>
+        <p class="fine credit">Built by Atiqul Islam Chowdhury · Bangladesh · 2026</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ presenter panels -->
+  <section id="invite" class="panel side" hidden>
+    <div class="sidehead">
+      <p class="eyebrow" id="inviteLabel">Your call code</p>
+      <button id="inviteClose" class="iconbtn" aria-label="Hide panel">×</button>
+    </div>
+    <div id="inviteCode" class="code">------</div>
+    <div class="actions">
+      <button id="copyLink" class="btn primary">Copy invite link</button>
+      <button id="shareLink" class="btn" hidden>Share…</button>
+    </div>
+    <p id="inviteNote" class="fine">Open the link on another phone or laptop.</p>
+
+    <div id="studio" class="studio" hidden>
+      <div id="studioLive" class="studiosec" hidden>
+        <h2>Now showing</h2>
+        <label>Product <input id="cardName" maxlength="50" placeholder="Handmade leather bag"></label>
+        <div class="row2">
+          <label>Price <input id="cardPrice" maxlength="20" placeholder="৳ 1,450"></label>
+          <label>Order via <input id="cardContact" maxlength="80" placeholder="WhatsApp with country code, or a link"></label>
+        </div>
+        <div class="actions"><button id="cardShow" class="btn primary">Show to viewers</button><button id="cardHide" class="btn">Hide</button></div>
+        <p class="fine"><span id="heartCount">0</span> hearts so far</p>
+      </div>
+      <div id="studioClass" class="studiosec" hidden>
+        <h2>Board</h2>
+        <label class="sr" for="boardText">Board text</label>
+        <textarea id="boardText" rows="4" maxlength="400" placeholder="Today: photosynthesis&#10;1. Light&#10;2. Water + CO₂&#10;3. Glucose + O₂"></textarea>
+        <div class="actions"><button id="boardShow" class="btn primary">Pin to board</button><button id="boardHide" class="btn">Clear</button></div>
+        <h2>Raised hands</h2>
+        <ul id="handList" class="hands"><li class="empty">No hands up.</li></ul>
+      </div>
+      <div id="studioStage" class="studiosec" hidden>
+        <h2>Name caption</h2>
+        <div class="row2">
+          <label>Name <input id="titleName" maxlength="40" placeholder="Your name"></label>
+          <label>Role <input id="titleRole" maxlength="60" placeholder="Founder, Example Ltd."></label>
+        </div>
+        <div class="actions"><button id="titleShow" class="btn primary">Show caption</button><button id="titleHide" class="btn">Hide</button></div>
+        <p class="fine"><span id="clapCount">0</span> rounds of applause</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ overlays -->
+  <aside id="castCard" class="card" hidden>
+    <p class="eyebrow">Now showing</p>
+    <b id="ccName"></b>
+    <span id="ccPrice" class="price"></span>
+    <a id="ccOrder" class="btn primary" target="_blank" rel="noopener noreferrer" hidden>Order</a>
+    <span id="ccContact" class="fine" hidden></span>
+  </aside>
+  <aside id="castBoard" class="board" hidden><p class="eyebrow">Board</p><div id="boardOut"></div></aside>
+  <div id="castTitle" class="lowerthird" hidden><b id="ltName"></b><span id="ltRole"></span></div>
+  <div id="productTag" class="tag" hidden></div>
+  <div id="reactions" class="reactions" aria-hidden="true"></div>
+
+  <!-- ============================================================ toolbar -->
+  <nav id="toolbar" class="toolbar" hidden aria-label="Controls">
+    <div class="seg" role="group" aria-label="View">
+      <button data-view="room" aria-pressed="true">Room</button>
+      <button data-view="camera" aria-pressed="false">Camera AR</button>
+      <button data-view="xr" aria-pressed="false" hidden>Place in room</button>
+    </div>
+    <div class="seg" id="styleSeg" role="group" aria-label="Style">
+      <button data-style="holo" aria-pressed="true">Hologram</button>
+      <button data-style="real" aria-pressed="false">Real</button>
+    </div>
+    <div class="seg" role="group" aria-label="Options">
+      <button id="tiltBtn" aria-pressed="false">Tilt to look</button>
+      <button id="glassesBtn" aria-pressed="false">Glasses 3D</button>
+    </div>
+    <label class="size" id="sizeWrap" for="sizeRange">Size <input id="sizeRange" type="range" min="0.6" max="2.2" step="0.05" value="1"></label>
+    <div class="seg" id="extraBtns" role="group" aria-label="Actions">
+      <button id="heartBtn" hidden>❤ Heart</button>
+      <button id="handBtn" aria-pressed="false" hidden>✋ Raise hand</button>
+      <button id="clapBtn" hidden>👏 Applause</button>
+      <button id="displayBtn" hidden>Display mode</button>
+      <button id="panelBtn" hidden>Code &amp; tools</button>
+    </div>
+    <button id="hangup" class="btn danger">End</button>
+  </nav>
+
+  <div id="xrHint" class="xrhint" hidden></div>
+  <button id="exitMode" class="btn exitmode" hidden>Exit</button>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</div>
+</body>
+</html>
