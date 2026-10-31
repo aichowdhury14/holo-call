@@ -114,7 +114,30 @@ async function begin({ camera = false, segmenter = false } = {}) {
   $('lobby').hidden = true;
   $('toolbar').hidden = false;
   stage.setLobby(false);
+  keepAwake(true);
+  firstTimeHint();
   return true;
+}
+
+// Phones dim and lock during long calls or while watching the TV; ask them not to.
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && document.visibilityState === 'visible') {
+      wakeLock = await navigator.wakeLock?.request('screen');
+      wakeLock?.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on) {
+      await wakeLock?.release();
+      wakeLock = null;
+    }
+  } catch { /* not supported or refused; harmless */ }
+}
+document.addEventListener('visibilitychange', () => { if (session.kind && document.visibilityState === 'visible') keepAwake(true); });
+
+function firstTimeHint() {
+  let seen = false;
+  try { seen = localStorage.getItem('holocall.hint') === '1'; localStorage.setItem('holocall.hint', '1'); } catch { /* private mode */ }
+  if (!seen) setTimeout(() => toast('Drag to look around · pinch or scroll to zoom · tap parts of a product to use them', 6000), 900);
 }
 
 async function showRemote(stream) {
@@ -149,6 +172,11 @@ $('micBtn').addEventListener('click', () => {
   setAvButtons();
   sendAv();
   toast(media.local.mic ? 'Microphone on.' : 'Microphone muted. They can\'t hear you.', 2200);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() !== 'm' || $('avBtns').hidden || $('toolbar').hidden || e.target.closest?.('input, textarea, select')) return;
+  $('micBtn').click();
 });
 
 $('camBtn').addEventListener('click', () => {
@@ -253,6 +281,7 @@ if (navigator.share) {
   });
 }
 $('inviteClose').addEventListener('click', () => { $('invite').hidden = true; });
+$('inviteCode').addEventListener('click', () => $('copyLink').click());
 $('panelBtn').addEventListener('click', () => { $('invite').hidden = !$('invite').hidden; });
 
 // ---------------------------------------------------------------- Call tab
@@ -358,7 +387,7 @@ async function openProduct(id, option) {
   loadProduct(id, option);
   configureToolbar({ style: false, size: false, cutout: false });
   $('wallRow').hidden = false;
-  setStatus('Real size · drag to look around, tap parts to use them', 'live');
+  setStatus('Real size · tap parts to use them', 'live');
 }
 
 // Shows a catalogue product; also used to switch its size or colour in place.
@@ -372,7 +401,9 @@ function loadProduct(id, option) {
   $('productTag').textContent = made.label;
   $('productTag').hidden = false;
   if (made.tv) made.tv.onNeedVideo = () => $('tvFile').click();
-  $('tvRemote').hidden = !made.tv;
+  // Phones start with the remote closed so it doesn't cover the TV; the screen itself is tappable.
+  $('tvRemote').hidden = !made.tv || innerWidth < 640;
+  if (made.tv && innerWidth < 640) toast('Tap the TV screen to use it, or open the Remote.', 4500);
   renderProductControls();
   history.replaceState(null, '', `${location.pathname}?item=${id}${opt ? `&opt=${encodeURIComponent(opt)}` : ''}#shop`);
 }
@@ -402,6 +433,15 @@ function renderProductControls() {
     });
     box.appendChild(b);
   }
+  const share = document.createElement('button');
+  share.textContent = 'Share';
+  share.title = 'Copy a link that opens this product';
+  share.addEventListener('click', async () => {
+    const url = location.href;
+    if (navigator.share) { navigator.share({ title: `${def.name} on HoloCall`, url }).catch(() => {}); return; }
+    try { await navigator.clipboard.writeText(url); toast('Link copied. It opens this product at real size.'); } catch { toast(url, 9000); }
+  });
+  box.appendChild(share);
   if (p.tv) {
     const b = document.createElement('button');
     b.textContent = 'Remote';
@@ -552,6 +592,7 @@ $('viewOwn').addEventListener('click', async () => {
   stage.showImage(cut.canvas, cut.alpha, cut.w, cut.h, { w: w / 100, h: h / 100, d: Math.min(w, h) / 200 });
   setStyle(false);
   configureToolbar({ style: true, size: false, cutout: false });
+  $('wallRow').hidden = false;
   const name = $('prodName').value.trim() || 'Your product';
   $('productTag').textContent = `${name} · ${w} × ${h} cm`;
   $('productTag').hidden = false;
@@ -760,6 +801,7 @@ document.querySelectorAll('.castjoin').forEach((form) => form.addEventListener('
   const code = cleanCode(input.value);
   if (code.length !== 6) { toast('Codes are 6 letters and numbers, like K7Q2MX.'); input.focus(); return; }
   const name = form.querySelector('.namein')?.value.trim().slice(0, 30) || '';
+  if (name) try { localStorage.setItem('holocall.name', name); } catch { /* private mode */ }
   if (preset === 'class' && !name) { toast('Type your name so the teacher knows who you are.'); form.querySelector('.namein').focus(); return; }
   startViewer(preset, code, name);
 }));
@@ -882,6 +924,7 @@ $('soundBtn').addEventListener('click', () => { stage.unmuteSubject().catch(() =
 // ---------------------------------------------------------------- end
 
 function endSession() {
+  keepAwake(false);
   session.link?.close();
   session.link = null;
   if (stage.inXR()) stage.endXR();
@@ -916,6 +959,11 @@ function endSession() {
 }
 $('hangup').addEventListener('click', endSession);
 addEventListener('pagehide', () => session.link?.close());
+addEventListener('beforeunload', (e) => {
+  if (['call', 'host'].includes(session.kind) && session.link) { e.preventDefault(); e.returnValue = ''; }
+});
+addEventListener('offline', () => toast('You\'re offline. Calls will reconnect when the internet is back.', 6000));
+addEventListener('online', () => { if (session.link) toast('Back online.'); });
 
 // ---------------------------------------------------------------- boot
 
@@ -924,6 +972,8 @@ new ResizeObserver(([entry]) => {
   const h = entry.target.hidden ? 0 : entry.target.getBoundingClientRect().height;
   document.documentElement.style.setProperty('--tb', `${Math.round(h)}px`);
 }).observe($('toolbar'));
+
+try { $('className').value = localStorage.getItem('holocall.name') || ''; } catch { /* private mode */ }
 
 for (const input of document.querySelectorAll('.codein')) {
   input.addEventListener('input', () => { input.value = input.value.toUpperCase(); });

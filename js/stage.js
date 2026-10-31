@@ -504,6 +504,9 @@ function layout() {
     } else {
       target = new THREE.Vector3(0, onTable ? base + h * 0.4 : Math.max(0.4, h * 0.5), 0);
       dist = onTable ? clamp(Math.max(h, w) * 2.2 + 0.75, 0.9, 2.6) : clamp(Math.max(h, w * 0.9) * 1.7 + 0.6, 1.2, 3.6);
+      // Narrow portrait screens: step back until the full width fits (within the room).
+      const halfH = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect);
+      dist = Math.max(dist, Math.min(4.2, (w * 0.62) / Math.tan(halfH)));
     }
   }
   if (!xr && !st.lobby) frameCamera(target, dist);
@@ -778,6 +781,7 @@ function resize() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h, false);
   stereo.setSize(w, h);
+  if (!st.lobby && st.mount === 'floor') layout();  // re-frame after rotating a phone
 }
 addEventListener('resize', resize);
 resize();
