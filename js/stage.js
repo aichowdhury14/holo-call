@@ -4,6 +4,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { StereoEffect } from 'three/addons/StereoEffect.js';
+import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
+import { buildHome, CEILING } from './home.js';
+import * as tx from './textures.js';
 
 export const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const TINT = new THREE.Color(0x6fe7ff);
@@ -25,6 +28,8 @@ const st = {
   mount: 'projector',      // projector | stage | floor
   kind: null,              // video | image | model | null
   dims: { w: 0.6, h: 0.8, d: 0.4 },
+  place: 'wall',
+  mountY: 0,
 };
 
 // ---------------------------------------------------------------- renderer & scene
@@ -33,8 +38,13 @@ const canvas = $('stage');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setClearColor(0x000000, 0);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
+// Soft studio reflections for glossy products (fridge glass, TV panel, steel); home room only.
+const envMap = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture;
 const fog = new THREE.Fog(BG, 4, 11);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 60);
@@ -51,10 +61,30 @@ controls.maxPolarAngle = 1.62;
 const stereo = new StereoEffect(renderer);
 stereo.setEyeSeparation(0.064);
 
-scene.add(new THREE.HemisphereLight(0xcfe9ff, 0x0a0f1c, 1.2));
+const hemi = new THREE.HemisphereLight(0xcfe9ff, 0x0a0f1c, 1.2);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(1.5, 3, 2.5);
-scene.add(sun);
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -4.5, right: 4.5, top: 4.5, bottom: -4.5, near: 0.5, far: 30 });
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+// Room light from above the viewer's shoulder, home room only; its shadows ground the products.
+const fill = new THREE.DirectionalLight(0xfff3e2, 0);
+fill.position.set(-1.6, 4.2, 3.2);
+fill.shadow.mapSize.set(2048, 2048);
+Object.assign(fill.shadow.camera, { left: -3.2, right: 3.2, top: 3.4, bottom: -1, near: 0.5, far: 12 });
+fill.shadow.bias = -0.0004;
+fill.shadow.normalBias = 0.02;
+fill.shadow.radius = 4;
+scene.add(fill);
+
+// The Bangladeshi room used by the product viewer.
+const home = buildHome();
+home.group.visible = false;
+scene.add(home.group);
+export const setWallColour = (hex) => home.setWall(hex);
 const keyLight = new THREE.PointLight(0x6fe7ff, 6, 6);
 keyLight.position.set(0, 0.6, 0.8);
 scene.add(keyLight);
@@ -149,15 +179,19 @@ function radialTexture(rgb, stops) {
 function buildTable(w, d) {
   if (table) { rig.remove(table); table.traverse((o) => o.geometry?.dispose()); }
   table = new THREE.Group();
-  const wood = new THREE.MeshStandardMaterial({ color: 0x3b2f2a, roughness: 0.6 });
-  const top = new THREE.Mesh(new THREE.BoxGeometry(w, 0.04, d), wood);
-  top.position.y = TABLE_H - 0.02;
+  const wood = new THREE.MeshStandardMaterial({ map: tx.wood('#6b4226'), roughness: 0.45 });
+  const top = new THREE.Mesh(new THREE.BoxGeometry(w, 0.035, d), wood);
+  top.position.y = TABLE_H - 0.018;
   table.add(top);
+  const apron = new THREE.Mesh(new THREE.BoxGeometry(w - 0.08, 0.08, d - 0.08), wood);
+  apron.position.y = TABLE_H - 0.075;
+  table.add(apron);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, TABLE_H - 0.04, 12), wood);
-    leg.position.set(sx * (w / 2 - 0.05), (TABLE_H - 0.04) / 2, sz * (d / 2 - 0.05));
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.045, TABLE_H - 0.035, 0.045), wood);
+    leg.position.set(sx * (w / 2 - 0.05), (TABLE_H - 0.035) / 2, sz * (d / 2 - 0.05));
     table.add(leg);
   }
+  table.traverse((o) => { o.castShadow = o.receiveShadow = true; });
   rig.add(table);
 }
 
@@ -371,12 +405,16 @@ export function showImage(canvasEl, alpha, aw, ah, dims) {
   layout();
 }
 
-export function showModel(object, dims) {
+// place: wall (back against the wall), ceiling (hangs from it), wallHigh (mounted at mountY).
+export function showModel(object, dims, { place = 'wall', mountY = 0 } = {}) {
   clearModel();
   subjectVideo.srcObject = null;
+  object.traverse((o) => { if (o.isMesh && o.userData.shadow !== false) o.castShadow = o.receiveShadow = true; });
   modelHolder.add(object);
   st.kind = 'model';
   st.dims = { ...dims };
+  st.place = place;
+  st.mountY = mountY;
   cutout.visible = false;
   layout();
 }
@@ -405,7 +443,7 @@ export function unmuteSubject() { subjectVideo.muted = false; return subjectVide
 
 // ---------------------------------------------------------------- layout & framing
 
-export function setMount(mount) { st.mount = mount; layout(); }
+export function setMount(mount) { st.mount = mount; applyBackdrop(); layout(); }
 export function setSize(size) { st.size = size; layout(); }
 
 function layout() {
@@ -428,35 +466,65 @@ function layout() {
     beam.geometry.dispose();
     beam.geometry = new THREE.CylinderGeometry(Math.min(W, H) * 0.42, 0.19, beamH, 48, 1, true).translate(0, beamH / 2, 0);
     if (table) table.visible = false;
+    modelHolder.position.y = 0;
+    sun.position.set(1.5, 3, 2.5);
+    sun.target.position.set(0, 0, 0);
     target = new THREE.Vector3(0, BEAM_TOP + H * 0.35, 0);
     dist = 2.4 * Math.max(1, st.size * 0.9);
   } else {
-    const { w, h, d } = st.dims;
-    const onTable = h < 0.6 && !xr && !!st.kind;
+    const { w, h, d = w * 0.6 } = st.dims;
+    const model = st.kind === 'model';
+    const place = model ? st.place : 'wall';
+    const onTable = !model && h < 0.6 && !!st.kind;
     const base = onTable ? TABLE_H : 0;
-    if (onTable) buildTable(Math.max(0.6, w + 0.3), Math.max(0.45, Math.min(0.9, (d || w * 0.6) + 0.25)));
+    const tableD = Math.max(0.45, Math.min(0.9, d + 0.25));
+    if (onTable) buildTable(Math.max(0.6, w + 0.3), tableD);
     else if (table) table.visible = false;
     cutout.scale.set(w, h, 1);
     cutoutBaseY = base + h / 2;
     cutout.position.set(0, cutoutBaseY, 0);
     cutMat.uniforms.uBulge.value = Math.min(0.25, Math.min(w, h) * 0.25);
-    modelHolder.position.y = base;
+    shadow.visible = !model && !!st.kind;
     shadow.position.y = base + 0.002;
-    shadow.scale.set(w * 1.3 + 0.1, (d || w * 0.6) * 1.3 + 0.1, 1);
-    target = new THREE.Vector3(0, onTable ? base + h * 0.4 : Math.max(0.35, h * 0.5), 0);
-    dist = onTable ? clamp(Math.max(h, w) * 2.2 + 0.75, 0.9, 3) : clamp(Math.max(h, w * 0.9) * 1.9 + 0.5, 1.1, 7);
+    shadow.scale.set(w * 1.3 + 0.1, d * 1.3 + 0.1, 1);
+    // In WebXR the real room is the reference: ceiling items hang 2.6 m above the tapped floor.
+    const ceilingY = xr ? 2.6 : CEILING;
+    modelHolder.position.y = place === 'ceiling' ? ceilingY : place === 'wallHigh' ? st.mountY : base;
+    // Slide the room so the back wall sits just behind the product.
+    const depth = onTable ? tableD : d;
+    home.group.position.z = place === 'ceiling' ? -1.9 : -(depth / 2 + 0.02);
+    sun.position.set(13, 5.6, home.group.position.z + home.window.z);
+    sun.target.position.set(0, 0, home.group.position.z + home.window.z * 0.6);
+    if (place === 'ceiling') {
+      target = new THREE.Vector3(0, ceilingY - 0.75, 0);
+      dist = 2.6;
+    } else if (place === 'wallHigh') {
+      target = new THREE.Vector3(0, st.mountY - 0.8, 0);   // show the wall down to the floor for scale
+      dist = 3.3;
+    } else {
+      target = new THREE.Vector3(0, onTable ? base + h * 0.4 : Math.max(0.4, h * 0.5), 0);
+      dist = onTable ? clamp(Math.max(h, w) * 2.2 + 0.75, 0.9, 2.6) : clamp(Math.max(h, w * 0.9) * 1.7 + 0.6, 1.2, 3.6);
+    }
   }
   if (!xr && !st.lobby) frameCamera(target, dist);
 }
 
 function frameCamera(target, dist) {
   const s = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
+  const indoor = st.mount === 'floor';
   controls.target.copy(target);
   s.radius = dist;
-  s.phi = clamp(s.phi, 1.2, 1.5);
+  s.theta = clamp(s.theta, -0.6, 0.6);
+  if (indoor && st.place === 'ceiling') s.phi = 1.75;       // look up at a ceiling fan
+  else s.phi = clamp(s.phi, 1.2, 1.5);
   camera.position.setFromSpherical(s).add(target);
   controls.minDistance = dist * 0.4;
-  controls.maxDistance = dist * 2.2;
+  // Indoors, keep the camera inside the walls and under the ceiling.
+  controls.maxDistance = indoor ? Math.min(dist * 1.6, 4.2) : dist * 2.2;
+  controls.minAzimuthAngle = indoor ? -0.75 : -1.05;
+  controls.maxAzimuthAngle = indoor ? 0.75 : 1.05;
+  controls.minPolarAngle = indoor ? Math.acos(clamp((CEILING - 0.25 - target.y) / controls.maxDistance, -1, 1)) : 0.6;
+  controls.maxPolarAngle = indoor ? (st.place === 'ceiling' ? 2.1 : 1.62) : 1.62;
   controls.update();
   if (st.tilt) startTiltFromCamera();
 }
@@ -505,8 +573,19 @@ export async function setView(view) {
 function applyBackdrop() {
   const xr = renderer.xr.isPresenting;
   const virtual = st.view === 'room' && !st.glasses && !xr;
-  room.visible = virtual;
-  scene.fog = virtual ? fog : null;
+  const indoor = st.mount === 'floor';
+  room.visible = virtual && !indoor;
+  home.group.visible = virtual && indoor;
+  scene.fog = virtual && !indoor ? fog : null;
+  // Indoors: daylight through the window casts shadows, plus reflections for glossy products.
+  scene.environment = indoor ? envMap : null;
+  sun.castShadow = indoor;
+  fill.castShadow = indoor;
+  sun.intensity = indoor ? 2.2 : 1.6;
+  hemi.intensity = indoor ? 0.35 : 1.2;
+  fill.intensity = indoor ? 1.5 : 0;
+  renderer.toneMappingExposure = indoor ? 0.92 : 1;
+  if (indoor && virtual) { scene.background = new THREE.Color(0x1a1d22); return; }
   if (st.view === 'camera' || xr) scene.background = null;
   else if (!virtual) scene.background = BLACK;
   else scene.background = st.mount === 'stage' ? STAGE_BG : BG;
@@ -638,11 +717,31 @@ function handleXRFrame(frame) {
 const frameHooks = new Set();
 export function onFrame(fn) { frameHooks.add(fn); }
 
-let holoMix = 1;
+let holoMix = 1, lastT = 0;
+
+// Taps (not drags) on a product part call the nearest ancestor's userData.onTap(hit).
+const raycaster = new THREE.Raycaster();
+let downAt = null;
+canvas.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+canvas.addEventListener('pointerup', (e) => {
+  if (!downAt || st.kind !== 'model' || renderer.xr.isPresenting) return;
+  const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+  if (moved > 8 || performance.now() - downAt.t > 500) return;
+  const r = canvas.getBoundingClientRect();
+  raycaster.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  for (const hit of raycaster.intersectObject(modelHolder, true)) {
+    for (let o = hit.object; o && o !== modelHolder; o = o.parent) {
+      if (o.userData.onTap) { o.userData.onTap(hit); return; }
+    }
+  }
+});
 
 renderer.setAnimationLoop((ms, frame) => {
   const t = ms / 1000;
+  const dt = Math.min(0.1, t - lastT);
+  lastT = t;
   frameHooks.forEach((fn) => fn(t));
+  for (const m of modelHolder.children) m.userData.update?.(t, dt);
 
   holoMix += ((st.holo ? 1 : 0) - holoMix) * 0.12;
   cutMat.uniforms.uHolo.value = holoMix;
