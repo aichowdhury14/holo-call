@@ -1,7 +1,9 @@
 import * as stage from './stage.js';
 import * as media from './media.js';
 import { loadPersonSegmenter, segmentVideo, resetVideo } from './segment.js';
-import { SAMPLES, loadPhoto, cutPhoto, wholePhoto } from './products.js';
+import { loadPhoto, cutPhoto, wholePhoto } from './products.js';
+import { CATALOG } from './catalog.js';
+import { WALL_COLOURS } from './home.js';
 import * as net from './net.js';
 
 const $ = (id) => document.getElementById(id);
@@ -32,6 +34,7 @@ const session = {
   reactAt: new Map(),
   hearts: 0,
   claps: 0,
+  product: null,     // the catalogue product on show: { id, option, ...made }
 };
 
 // Live video subjects get a fresh AI mask every frame (unless showing the full frame).
@@ -315,19 +318,136 @@ $('callJoin').addEventListener('submit', async (e) => {
 
 // ---------------------------------------------------------------- Shop tab
 
-async function viewSample(id) {
-  const sample = SAMPLES[id];
+// The catalogue grid: one card per product, with its options (size, colour) as a picker.
+for (const [id, p] of Object.entries(CATALOG)) {
+  const card = document.createElement('div');
+  card.className = 'pcard';
+  const btn = document.createElement('button');
+  btn.className = 'sbtn';
+  btn.dataset.product = id;
+  btn.dataset.start = '';
+  for (const [tag, cls, text] of [['b', '', p.name], ['span', 'bn', p.bn], ['span', '', p.blurb]]) {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    el.textContent = text;
+    btn.appendChild(el);
+  }
+  card.appendChild(btn);
+  let select = null;
+  if (p.options) {
+    select = document.createElement('select');
+    select.id = `opt-${id}`;
+    select.setAttribute('aria-label', `${p.name} option`);
+    for (const o of p.options) {
+      const op = document.createElement('option');
+      op.value = o;
+      op.textContent = p.optionLabel ? p.optionLabel(o) : o;
+      select.appendChild(op);
+    }
+    select.value = p.defaultOption || p.options[0];
+    card.appendChild(select);
+  }
+  btn.addEventListener('click', () => openProduct(id, select?.value));
+  $('samples').appendChild(card);
+}
+
+async function openProduct(id, option) {
   if (!await begin()) return;
   session.kind = 'shop';
-  const m = sample.make($('tvSize').value);
   stage.setMount('floor');
-  stage.showModel(m.object, m.dims);
+  loadProduct(id, option);
   configureToolbar({ style: false, size: false, cutout: false });
-  $('productTag').textContent = m.label;
-  $('productTag').hidden = false;
-  setStatus('Real size · drag to look around', 'live');
+  $('wallRow').hidden = false;
+  setStatus('Real size · drag to look around, tap parts to use them', 'live');
 }
-document.querySelectorAll('[data-sample]').forEach((b) => b.addEventListener('click', () => viewSample(b.dataset.sample)));
+
+// Shows a catalogue product; also used to switch its size or colour in place.
+function loadProduct(id, option) {
+  const def = CATALOG[id];
+  const opt = option ?? def.defaultOption ?? def.options?.[0];
+  session.product?.dispose?.();
+  const made = def.make(opt);
+  session.product = { id, option: opt, ...made };
+  stage.showModel(made.object, made.dims, { place: made.place, mountY: made.mountY });
+  $('productTag').textContent = made.label;
+  $('productTag').hidden = false;
+  if (made.tv) made.tv.onNeedVideo = () => $('tvFile').click();
+  $('tvRemote').hidden = !made.tv;
+  renderProductControls();
+  history.replaceState(null, '', `${location.pathname}?item=${id}${opt ? `&opt=${encodeURIComponent(opt)}` : ''}#shop`);
+}
+
+function renderProductControls() {
+  const box = $('productBtns');
+  box.textContent = '';
+  const p = session.product;
+  if (!p) { box.hidden = true; return; }
+  const def = CATALOG[p.id];
+  for (const c of p.controls) {
+    const b = document.createElement('button');
+    b.textContent = c.label();
+    if (c.aria) b.setAttribute('aria-label', c.aria);
+    if (c.pressed) b.setAttribute('aria-pressed', String(c.pressed()));
+    b.addEventListener('click', () => { c.run(); renderProductControls(); });
+    box.appendChild(b);
+  }
+  if (def.options) {
+    const b = document.createElement('button');
+    const label = def.optionLabel ? def.optionLabel(p.option) : p.option;
+    b.textContent = `${def.optionLabel ? 'Size' : 'Colour'}: ${label}`;
+    b.title = 'Switch to the next option';
+    b.addEventListener('click', () => {
+      const i = def.options.indexOf(p.option);
+      loadProduct(p.id, def.options[(i + 1) % def.options.length]);
+    });
+    box.appendChild(b);
+  }
+  if (p.tv) {
+    const b = document.createElement('button');
+    b.textContent = 'Remote';
+    b.setAttribute('aria-pressed', String(!$('tvRemote').hidden));
+    b.addEventListener('click', () => { $('tvRemote').hidden = !$('tvRemote').hidden; renderProductControls(); });
+    box.appendChild(b);
+  }
+  box.hidden = box.childElementCount === 0;
+}
+
+// TV remote: on-screen buttons and the keyboard.
+document.querySelectorAll('#tvRemote [data-key]').forEach((b) => b.addEventListener('click', () => {
+  session.product?.tv?.press(b.dataset.key);
+  renderProductControls();
+}));
+$('tvFileBtn').addEventListener('click', () => $('tvFile').click());
+$('tvFile').addEventListener('change', (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file || !session.product?.tv) return;
+  session.product.tv.playFile(file).catch(() => toast('This video can\'t play in the browser. Try an MP4 file.', 5000));
+  renderProductControls();
+});
+document.addEventListener('keydown', (e) => {
+  const tv = session.product?.tv;
+  if (!tv || $('tvRemote').hidden || e.target.closest?.('input, textarea, select')) return;
+  const key = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok', Backspace: 'back', h: 'home', '+': 'volUp', '=': 'volUp', '-': 'volDown' }[e.key];
+  if (!key) return;
+  e.preventDefault();
+  tv.press(key);
+  renderProductControls();
+});
+
+// Wall colour, to picture the product against your own walls.
+for (const [name, hex] of Object.entries(WALL_COLOURS)) {
+  const b = document.createElement('button');
+  b.style.background = hex;
+  b.title = name;
+  b.setAttribute('aria-label', `${name} walls`);
+  b.setAttribute('aria-pressed', String(name === 'Cream'));
+  b.addEventListener('click', () => {
+    stage.setWallColour(hex);
+    for (const o of $('wallSwatches').children) o.setAttribute('aria-pressed', String(o === b));
+  });
+  $('wallSwatches').appendChild(b);
+}
 
 let photo = null, cut = null, tapAt = null;
 
@@ -666,6 +786,8 @@ function setMorePanel(open) {
 $('moreBtn').addEventListener('click', () => setMorePanel($('morePanel').hidden));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('morePanel').hidden) setMorePanel(false); });
 $('stage').addEventListener('pointerdown', () => setMorePanel(false));
+// Tapping a product part (a door, a burner) changes its state, so refresh the buttons.
+$('stage').addEventListener('pointerup', () => { if (session.product) setTimeout(renderProductControls, 0); });
 
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', async () => {
   try {
@@ -777,6 +899,10 @@ function endSession() {
   $('handBtn').setAttribute('aria-pressed', 'false');
   $('handBtn').textContent = '✋ Raise hand';
   $('productBtns').textContent = '';
+  session.product?.dispose?.();
+  session.product = null;
+  $('tvRemote').hidden = true;
+  $('wallRow').hidden = true;
   setStyle(true);
   setCutout(true);
   setSize(1);
@@ -785,6 +911,8 @@ function endSession() {
   $('lobby').hidden = false;
   setStatus('Ready', 'idle');
   if (location.search) history.replaceState(null, '', `${location.pathname}${location.hash}`);
+  stage.setWallColour(WALL_COLOURS.Cream);
+  for (const o of $('wallSwatches').children) o.setAttribute('aria-pressed', String(o.title === 'Cream'));
 }
 $('hangup').addEventListener('click', endSession);
 addEventListener('pagehide', () => session.link?.close());
@@ -813,6 +941,14 @@ if (joinCode) {
   $(input).value = joinCode;
   setStatus(`Invited · code ${joinCode} · tap to join`, 'busy');
   if (tab === 'class') $('className').focus();
+}
+
+// A shared product link (?item=fridge&opt=Silver#shop) opens that product straight away.
+const sharedItem = new URLSearchParams(location.search).get('item');
+if (sharedItem && CATALOG[sharedItem]) {
+  selectTab('shop');
+  const opt = new URLSearchParams(location.search).get('opt');
+  openProduct(sharedItem, CATALOG[sharedItem].options?.includes(opt) ? opt : undefined);
 }
 
 stage.xrSupported().then((ok) => { document.querySelector('[data-view="xr"]').hidden = !ok; });

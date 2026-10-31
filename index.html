@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070b14'/%3E%3Cpath d='M11 25h10l3-14H8z' fill='%236fe7ff' opacity='.35'/%3E%3Ccircle cx='16' cy='9' r='4' fill='%236fe7ff'/%3E%3Cellipse cx='16' cy='26' rx='7' ry='2' fill='%236fe7ff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Saira+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Saira+Condensed:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": { "three": "./vendor/three-0.160.0/three.module.js", "three/addons/": "./vendor/three-0.160.0/addons/" } }
@@ -68,19 +68,8 @@
       <div role="tabpanel" id="p-shop" aria-labelledby="tab-shop" class="tp" hidden>
         <p class="eyebrow">Product viewer · real size</p>
         <h1>Will it fit? See it at real size.</h1>
-        <p class="lede">Pick a sample, or use a photo of any product you sell. Then place it on your floor or table at true size with your phone camera.</p>
-        <div class="samples" id="samples">
-          <div class="sample">
-            <button class="sbtn" data-sample="tv"><b>Television</b><span>Pick a screen size</span></button>
-            <select id="tvSize" aria-label="TV screen size">
-              <option value="32">32"</option><option value="43" selected>43"</option><option value="55">55"</option><option value="65">65"</option>
-            </select>
-          </div>
-          <button class="sbtn" data-sample="sofa"><b>Sofa</b><span>200 × 85 cm</span></button>
-          <button class="sbtn" data-sample="fridge"><b>Fridge</b><span>60 × 175 cm</span></button>
-          <button class="sbtn" data-sample="lamp"><b>Floor lamp</b><span>48 × 165 cm</span></button>
-          <button class="sbtn" data-sample="plant"><b>Plant</b><span>70 × 110 cm</span></button>
-        </div>
+        <p class="lede">See everyday products in a real room at true size: open the fridge, switch on the fan, watch the TV. Or use a photo of any product you sell. On an Android phone, place it on your own floor.</p>
+        <div class="samples" id="samples" aria-label="Products"></div>
 
         <div class="own">
           <div class="ownhead">
@@ -280,6 +269,10 @@
         <button id="glassesBtn" aria-pressed="false">Glasses 3D</button>
       </div>
     </div>
+    <div class="morerow" id="wallRow" hidden>
+      <span class="morelabel">Wall colour</span>
+      <div class="swatches" id="wallSwatches" role="group" aria-label="Wall colour"></div>
+    </div>
     <label class="morerow" id="sizeWrap" for="sizeRange"><span class="morelabel">Size</span><input id="sizeRange" type="range" min="0.6" max="2.2" step="0.05" value="1"></label>
   </div>
 
@@ -307,6 +300,35 @@
     <button id="moreBtn" class="btn" aria-expanded="false" aria-controls="morePanel">View ▴</button>
     <button id="hangup" class="btn danger">End</button>
   </nav>
+
+  <aside id="tvRemote" class="remote" hidden aria-label="TV remote">
+    <div class="rrow">
+      <button data-key="power" class="rpower" aria-label="Power">⏻</button>
+      <button data-key="home">Home</button>
+      <button data-key="back">Back</button>
+    </div>
+    <div class="dpad">
+      <button data-key="up" class="up" aria-label="Up">▲</button>
+      <button data-key="left" class="left" aria-label="Left">◀</button>
+      <button data-key="ok" class="ok">OK</button>
+      <button data-key="right" class="right" aria-label="Right">▶</button>
+      <button data-key="down" class="down" aria-label="Down">▼</button>
+    </div>
+    <div class="rrow">
+      <button data-key="volDown" aria-label="Volume down">Vol −</button>
+      <button data-key="volUp" aria-label="Volume up">Vol +</button>
+    </div>
+    <div class="rrow">
+      <button data-key="chDown" aria-label="Channel down">Ch −</button>
+      <button data-key="chUp" aria-label="Channel up">Ch +</button>
+    </div>
+    <div class="rrow">
+      <button data-key="netflix" class="rnetflix">NETFLIX</button>
+      <button data-key="youtube" class="ryoutube">YouTube</button>
+    </div>
+    <button id="tvFileBtn" class="rfile">▶ Play my video</button>
+    <input id="tvFile" type="file" accept="video/*" hidden>
+  </aside>
 
   <div id="xrHint" class="xrhint" hidden></div>
   <button id="exitMode" class="btn exitmode" hidden>Exit</button>
